@@ -19,6 +19,11 @@
       "matches": ["https://www.tradingview.com/*"],
       "js": ["content.js"],
       "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://app.driftsentinel.io/*"],
+      "js": ["bridge.js"],
+      "run_at": "document_idle"
     }
   ]
 }

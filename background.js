@@ -69,6 +69,11 @@ chrome.runtime.onMessage.addListener((msg, _sender, sendResponse) => {
     handleDisconnect().then(sendResponse);
     return true;
   }
+
+  if (msg.type === "TOKEN_UPDATED") {
+    pollState();
+    return false;
+  }
 });
 
 async function handleRegister({ supabase_jwt, account_ref }) {
