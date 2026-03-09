@@ -5,6 +5,7 @@
   "description": "Always Watching.",
   "permissions": ["storage", "alarms", "activeTab", "scripting"],
   "host_permissions": [
+    "https://tradingview.com/*",
     "https://www.tradingview.com/*",
     "https://api.driftsentinel.io/*",
     "https://app.driftsentinel.io/*"
@@ -16,7 +17,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://www.tradingview.com/*"],
+      "matches": [
+        "https://tradingview.com/*",
+        "https://www.tradingview.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_idle"
     },
