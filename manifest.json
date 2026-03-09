@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Drift Sentinel",
+  "version": "0.1.0",
+  "description": "Always Watching.",
+  "permissions": ["storage", "alarms", "activeTab", "scripting"],
+  "host_permissions": [
+    "https://www.tradingview.com/*",
+    "https://api.driftsentinel.io/*",
+    "https://app.driftsentinel.io/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": {
+    "default_popup": "popup.html",
+    "default_title": "Drift Sentinel"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://www.tradingview.com/*"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ]
+}
