@@ -317,8 +317,10 @@
   let startX, startY, startLeft, startTop;
 
   host.addEventListener("pointerdown", (e) => {
-    // Don't drag when clicking panel contents or dashboard button
-    if (e.target.closest && e.target.closest(".panel")) return;
+    // Don't drag when clicking panel contents or dashboard button.
+    // Must use composedPath() — e.target is retargeted to the host across the shadow boundary.
+    const path = e.composedPath();
+    if (path.some((el) => el.classList && el.classList.contains("panel"))) return;
     e.preventDefault();
     host.setPointerCapture(e.pointerId);
     didDrag = false;
@@ -354,8 +356,11 @@
       return;
     }
 
-    // Single click → toggle panel (only if click was on badge, not panel)
-    if (!e.target.closest || !e.target.closest(".panel")) {
+    // Single click → toggle panel (only if click was on badge, not panel).
+    // Must use composedPath() — e.target is retargeted to the host across the shadow boundary.
+    const path = e.composedPath();
+    const clickedPanel = path.some((el) => el.classList && el.classList.contains("panel"));
+    if (!clickedPanel) {
       togglePanel();
     }
   });
