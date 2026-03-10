@@ -72,7 +72,7 @@ function renderConnected(data) {
   const metrics = data.metrics || {};
 
   // --- Drift state → colors ---
-  const driftState = (drift.state || "STABLE").toUpperCase();
+  const driftState = (drift.state || "").toUpperCase();
   const stateInfo = STATES[driftState] || { color: GRAY, label: "NO DATA" };
   setStateColor(stateInfo.color);
 
@@ -121,6 +121,21 @@ function renderConnected(data) {
     document.getElementById("onboard-fill").style.width = pct + "%";
   }
 }
+
+// --- Live updates while popup is open ---
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.ds_last_state && changes.ds_last_state.newValue) {
+    renderConnected(changes.ds_last_state.newValue);
+  }
+  if (changes.ds_device_token) {
+    if (!changes.ds_device_token.newValue) {
+      setStateColor(GRAY);
+      document.getElementById("status-dot").classList.add("offline");
+      document.getElementById("status-label").textContent = "OFFLINE";
+      show($disconnected);
+    }
+  }
+});
 
 // --- Button handlers ---
 document.getElementById("btn-dashboard").addEventListener("click", () => {
