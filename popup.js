@@ -52,41 +52,47 @@ chrome.runtime.sendMessage({ type: "GET_AUTH_STATE" }, (res) => {
     document.getElementById("dsi-state").style.background = GRAY + "15";
     document.getElementById("trades-value").textContent = "--";
     document.getElementById("violations-value").textContent = "--";
-    document.getElementById("violations-value").style.color = GRAY;
     return;
   }
 
   renderConnected(res.last_state);
 });
 
+// FIELD PATHS — all read from flat /v1/state response shape:
+//   bss_score                    (not data.bss.score)
+//   bss_tier                     (not data.bss.tier)
+//   dsi_score                    (not data.drift.score)
+//   metrics.trades_today_utc     (not data.trades_today)
+//   metrics.violations_today_utc (not data.drift.violations_today)
+//   drift.state                  ✅ unchanged
 function renderConnected(data) {
   show($connected);
 
-  const bss = data.bss || {};
   const drift = data.drift || {};
+  const metrics = data.metrics || {};
 
   // --- Drift state → colors ---
   const driftState = (drift.state || "STABLE").toUpperCase();
   const stateInfo = STATES[driftState] || { color: GRAY, label: "NO DATA" };
   setStateColor(stateInfo.color);
 
-  // --- BSS ---
-  const bssScore = bss.score ?? "--";
+  // --- BSS — reads bss_score and bss_tier from top-level ---
+  const bssScore = data.bss_score ?? "--";
   const bssColor = typeof bssScore === "number"
     ? (bssScore >= 90 ? "#00D4AA" : bssScore >= 70 ? "#F59E0B" : "#EF4444")
     : GRAY;
   document.getElementById("bss-score").textContent = bssScore;
   document.getElementById("bss-score").style.color = bssColor;
 
-  const bssTier = (bss.tier || "UNRANKED").toUpperCase();
+  const bssTier = (data.bss_tier || "UNRANKED").toUpperCase();
   const tierColor = TIERS[bssTier] || GRAY;
   const $tier = document.getElementById("bss-tier");
   $tier.textContent = bssTier;
   $tier.style.color = tierColor;
   $tier.style.borderColor = tierColor;
 
-  // --- DSI ---
-  const dsiScore = drift.score ?? "--";
+  // --- DSI — reads dsi_score from top-level (not drift.score) ---
+  const dsiScore = data.dsi_score ?? "--";
   document.getElementById("dsi-score").textContent = dsiScore;
   document.getElementById("dsi-score").style.color = stateInfo.color;
 
@@ -95,21 +101,23 @@ function renderConnected(data) {
   $state.style.color = stateInfo.color;
   $state.style.background = stateInfo.color + "15";
 
-  // --- Metrics ---
-  const trades = data.trades_today ?? 0;
+  // --- Metrics — reads from metrics sub-object with _utc suffix ---
+  const trades = metrics.trades_today_utc ?? 0;
   document.getElementById("trades-value").textContent = trades;
 
-  const violations = drift.violations_today ?? 0;
+  const violations = metrics.violations_today_utc ?? 0;
   const $viol = document.getElementById("violations-value");
   $viol.textContent = violations;
   $viol.style.color = violations > 0 ? "#EF4444" : "#00D4AA";
 
   // --- Onboarding ---
   const onboard = data.onboarding;
-  if (onboard && onboard.collected < onboard.required) {
-    const pct = Math.min(100, Math.round((onboard.collected / onboard.required) * 100));
+  const collected = onboard?.baseline_progress?.collected ?? onboard?.collected ?? 0;
+  const required = onboard?.baseline_progress?.required ?? onboard?.required ?? 50;
+  if (onboard && collected < required) {
+    const pct = Math.min(100, Math.round((collected / required) * 100));
     document.getElementById("onboarding-bar").style.display = "block";
-    document.getElementById("onboard-count").textContent = onboard.collected + "/" + onboard.required;
+    document.getElementById("onboard-count").textContent = collected + "/" + required;
     document.getElementById("onboard-fill").style.width = pct + "%";
   }
 }

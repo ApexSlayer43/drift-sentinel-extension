@@ -17,12 +17,26 @@
     BREAKDOWN: "BREAKDOWN",
   };
   const GRAY = "#6B7280";
-  const DEFAULT_POS = { top: 12, left: null, right: 12 };
+  const DEFAULT_POS = { top: 12, right: 12 };
   const DRAG_THRESHOLD = 5;
 
   // ── Host element + Shadow DOM ──────────────────────────────
+  // DRAG FIX: position:fixed lives on the HOST (real DOM element), not inside shadow.
+  // TradingView's canvas layers intercept pointermove on shadow-internal fixed elements.
+  // Dragging the host itself stays above TradingView's event capture entirely.
   const host = document.createElement("div");
   host.id = "drift-sentinel-host";
+  Object.assign(host.style, {
+    position:      "fixed",
+    zIndex:        "2147483647",
+    top:           "12px",
+    right:         "12px",
+    left:          "auto",
+    bottom:        "auto",
+    pointerEvents: "all",
+    userSelect:    "none",
+    cursor:        "grab",
+  });
   const shadow = host.attachShadow({ mode: "open" });
   document.documentElement.appendChild(host);
 
@@ -31,40 +45,38 @@
   style.textContent = `
     @import url('https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700;900&display=swap');
 
-    :host { all: initial; }
+    :host { all: initial; display: block; }
 
     .badge {
-      position: fixed;
-      z-index: 2147483647;
       display: flex;
       align-items: center;
       gap: 6px;
       padding: 5px 12px;
       background: #0D1117;
-      border: 1.5px solid var(--sc, ${GRAY});
+      border: 1.5px solid var(--sc, #6B7280);
       border-radius: 9999px;
-      cursor: grab;
       user-select: none;
       font-family: 'JetBrains Mono', monospace;
       font-size: 10px;
       font-weight: 600;
       letter-spacing: 1.5px;
-      color: var(--sc, ${GRAY});
+      color: var(--sc, #6B7280);
       box-shadow: 0 2px 12px rgba(0,0,0,0.5);
       transition: border-color 0.3s, color 0.3s;
+      white-space: nowrap;
     }
-    .badge.dragging { cursor: grabbing; }
 
     .dot {
       width: 7px; height: 7px; border-radius: 50%;
-      background: var(--sc, ${GRAY});
-      box-shadow: 0 0 6px var(--sc, ${GRAY});
+      background: var(--sc, #6B7280);
+      box-shadow: 0 0 6px var(--sc, #6B7280);
       transition: background 0.3s, box-shadow 0.3s;
     }
 
     .panel {
-      position: fixed;
-      z-index: 2147483647;
+      position: absolute;
+      top: calc(100% + 6px);
+      right: 0;
       width: 220px;
       background: #0D1117;
       border: 1px solid #1F2937;
@@ -74,6 +86,7 @@
       font-family: 'JetBrains Mono', monospace;
       color: #E2E8F0;
       display: none;
+      cursor: default;
     }
     .panel.open { display: block; }
 
@@ -216,9 +229,16 @@
   }
 
   // ── Render ─────────────────────────────────────────────────
+  // FIELD PATHS — all read from flat /v1/state response shape:
+  //   bss_score                    (not data.bss.score)
+  //   bss_tier                     (not data.bss.tier)
+  //   dsi_score                    (not data.drift.score)
+  //   metrics.trades_today_utc     (not data.trades_today)
+  //   metrics.violations_today_utc (not data.drift.violations_today)
+  //   drift.state                  ✅ unchanged
   function render(data) {
     const drift = data?.drift || {};
-    const bss = data?.bss || {};
+    const metrics = data?.metrics || {};
     const state = (drift.state || "").toUpperCase();
     const color = getStateColor(state);
     const label = getStateLabel(state);
@@ -227,13 +247,12 @@
     badge.style.setProperty("--sc", color);
     badge.querySelector(".label").textContent = data ? label : "DS";
 
-    // BSS
-    const bssScore = bss.score ?? "--";
+    // BSS — reads bss_score (number) and bss_tier (string) from top-level
+    const bssScore = data?.bss_score ?? "--";
     const bssColor = typeof bssScore === "number"
       ? (bssScore >= 90 ? "#00D4AA" : bssScore >= 70 ? "#F59E0B" : "#EF4444")
       : GRAY;
-    const bssTier = (bss.tier || "UNRANKED").toUpperCase();
-    const tierColor = bssColor;
+    const bssTier = (data?.bss_tier || "UNRANKED").toUpperCase();
 
     const $bss = $("p-bss");
     $bss.textContent = bssScore;
@@ -241,25 +260,32 @@
 
     const $tier = $("p-tier");
     $tier.textContent = bssTier;
-    $tier.style.color = tierColor;
-    $tier.style.borderColor = tierColor;
+    $tier.style.color = bssColor;
+    $tier.style.borderColor = bssColor;
 
-    // DSI
-    const dsiScore = drift.score ?? data?.dsi_score ?? "--";
+    // DSI — reads dsi_score from top-level (not drift.score)
+    // DSI = 100 on a fresh session is CORRECT — no daily_scores row exists yet.
+    // It is NOT a fallback or error. It decrements as violations accumulate intraday.
+    // DSI resets each session. BSS (longitudinal) and DSI (intraday) are different clocks.
+    const dsiScore = data?.dsi_score ?? "--";
+    const dsiColor = typeof dsiScore === "number"
+      ? (dsiScore >= 85 ? "#00D4AA" : dsiScore >= 65 ? "#F59E0B" : "#EF4444")
+      : GRAY;
+
     const $dsi = $("p-dsi");
     $dsi.textContent = dsiScore;
-    $dsi.style.color = color;
+    $dsi.style.color = dsiColor;
 
     const $state = $("p-state");
     $state.textContent = label;
     $state.style.color = color;
     $state.style.background = color + "15";
 
-    // Metrics
-    const trades = data?.trades_today ?? 0;
+    // Metrics — reads from metrics sub-object with _utc suffix
+    const trades = metrics?.trades_today_utc ?? 0;
     $("p-trades").textContent = trades;
 
-    const violations = drift.violations_today ?? 0;
+    const violations = metrics?.violations_today_utc ?? 0;
     const $viol = $("p-viol");
     $viol.textContent = violations;
     $viol.style.color = violations > 0 ? "#EF4444" : "#00D4AA";
@@ -267,19 +293,18 @@
 
   // ── Position persistence ───────────────────────────────────
   function applyPosition(pos) {
-    badge.style.top = pos.top + "px";
-    if (pos.left != null) {
-      badge.style.left = pos.left + "px";
-      badge.style.right = "auto";
-    } else {
-      badge.style.right = (pos.right || 12) + "px";
-      badge.style.left = "auto";
-    }
+    host.style.top    = (pos.top  ?? 12) + "px";
+    host.style.left   = pos.left != null ? pos.left + "px" : "auto";
+    host.style.right  = pos.left != null ? "auto" : (pos.right ?? 12) + "px";
+    host.style.bottom = "auto";
   }
 
   function savePosition() {
-    const rect = badge.getBoundingClientRect();
-    const pos = { top: Math.round(rect.top), left: Math.round(rect.left) };
+    const pos = {
+      top:  Math.round(parseFloat(host.style.top)  || 12),
+      left: host.style.left !== "auto" ? Math.round(parseFloat(host.style.left)) : null,
+      right: host.style.right !== "auto" ? Math.round(parseFloat(host.style.right)) : 12,
+    };
     chrome.storage.local.set({ ds_badge_position: pos });
   }
 
@@ -287,63 +312,62 @@
     applyPosition(res.ds_badge_position || DEFAULT_POS);
   });
 
-  // ── Drag + Click logic ─────────────────────────────────────
-  let isDragging = false;
+  // ── Drag + Click logic (on HOST — avoids TradingView canvas capture) ────────
   let didDrag = false;
   let startX, startY, startLeft, startTop;
 
-  badge.addEventListener("pointerdown", (e) => {
+  host.addEventListener("pointerdown", (e) => {
+    // Don't drag when clicking panel contents or dashboard button
+    if (e.target.closest && e.target.closest(".panel")) return;
     e.preventDefault();
-    badge.setPointerCapture(e.pointerId);
-    isDragging = false;
+    host.setPointerCapture(e.pointerId);
     didDrag = false;
     startX = e.clientX;
     startY = e.clientY;
-    const rect = badge.getBoundingClientRect();
-    startLeft = rect.left;
-    startTop = rect.top;
+    startLeft = parseFloat(host.style.left) || (window.innerWidth - host.offsetWidth - (parseFloat(host.style.right) || 12));
+    startTop  = parseFloat(host.style.top)  || 12;
+    host.style.cursor = "grabbing";
   });
 
-  badge.addEventListener("pointermove", (e) => {
-    if (!badge.hasPointerCapture(e.pointerId)) return;
+  host.addEventListener("pointermove", (e) => {
+    if (!host.hasPointerCapture(e.pointerId)) return;
     const dx = e.clientX - startX;
     const dy = e.clientY - startY;
-    if (!isDragging && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
+    if (!didDrag && Math.sqrt(dx * dx + dy * dy) < DRAG_THRESHOLD) return;
 
-    isDragging = true;
     didDrag = true;
-    badge.classList.add("dragging");
 
-    const newLeft = Math.max(0, Math.min(window.innerWidth - badge.offsetWidth, startLeft + dx));
-    const newTop = Math.max(0, Math.min(window.innerHeight - badge.offsetHeight, startTop + dy));
+    const newLeft = Math.max(0, Math.min(window.innerWidth  - host.offsetWidth,  startLeft + dx));
+    const newTop  = Math.max(0, Math.min(window.innerHeight - host.offsetHeight, startTop  + dy));
 
-    badge.style.left = newLeft + "px";
-    badge.style.right = "auto";
-    badge.style.top = newTop + "px";
+    host.style.left   = newLeft + "px";
+    host.style.right  = "auto";
+    host.style.top    = newTop  + "px";
   });
 
-  badge.addEventListener("pointerup", (e) => {
-    badge.releasePointerCapture(e.pointerId);
-    badge.classList.remove("dragging");
+  host.addEventListener("pointerup", (e) => {
+    host.releasePointerCapture(e.pointerId);
+    host.style.cursor = "grab";
 
     if (didDrag) {
       savePosition();
       return;
     }
 
-    // Single click → toggle panel
-    togglePanel();
+    // Single click → toggle panel (only if click was on badge, not panel)
+    if (!e.target.closest || !e.target.closest(".panel")) {
+      togglePanel();
+    }
   });
 
-  // Double click → reset position
+  // Double click on badge → reset to default position
   badge.addEventListener("dblclick", (e) => {
-    e.preventDefault();
+    e.stopPropagation();
     applyPosition(DEFAULT_POS);
     chrome.storage.local.set({ ds_badge_position: DEFAULT_POS });
-    if (panel.classList.contains("open")) positionPanel();
   });
 
-  // ── Panel toggle + positioning ─────────────────────────────
+  // ── Panel toggle ───────────────────────────────────────────
   let outsideClickHandler = null;
 
   function togglePanel() {
@@ -355,15 +379,10 @@
   }
 
   function openPanel() {
-    positionPanel();
     panel.classList.add("open");
-
     outsideClickHandler = (e) => {
-      // Check if click is inside shadow DOM
       const path = e.composedPath();
-      if (!path.includes(badge) && !path.includes(panel)) {
-        closePanel();
-      }
+      if (!path.includes(host)) closePanel();
     };
     setTimeout(() => document.addEventListener("mousedown", outsideClickHandler), 0);
   }
@@ -376,34 +395,14 @@
     }
   }
 
-  function positionPanel() {
-    const rect = badge.getBoundingClientRect();
-    const midY = window.innerHeight / 2;
-    const panelW = 220;
-
-    // Horizontal: align right edge of panel with right edge of badge,
-    // but clamp to viewport
-    let left = rect.right - panelW;
-    if (left < 4) left = 4;
-    if (left + panelW > window.innerWidth - 4) left = window.innerWidth - panelW - 4;
-    panel.style.left = left + "px";
-
-    // Vertical: below badge if in top half, above if in bottom half
-    if (rect.top < midY) {
-      panel.style.top = (rect.bottom + 6) + "px";
-      panel.style.bottom = "auto";
-    } else {
-      panel.style.bottom = (window.innerHeight - rect.top + 6) + "px";
-      panel.style.top = "auto";
-    }
-  }
-
   // ── Dashboard button ───────────────────────────────────────
-  $("p-dash").addEventListener("click", () => {
+  $("p-dash").addEventListener("click", (e) => {
+    e.stopPropagation();
     window.open("https://app.driftsentinel.io", "_blank");
   });
 
   // ── Data: initial load + live updates ──────────────────────
+  // Reads from ds_last_state — flat /v1/state response stored by background.js
   chrome.storage.local.get("ds_last_state", (res) => {
     render(res.ds_last_state || null);
   });
@@ -411,8 +410,6 @@
   chrome.storage.onChanged.addListener((changes) => {
     if (changes.ds_last_state) {
       render(changes.ds_last_state.newValue || null);
-      // Reposition panel if open (badge text may change width)
-      if (panel.classList.contains("open")) positionPanel();
     }
   });
 
